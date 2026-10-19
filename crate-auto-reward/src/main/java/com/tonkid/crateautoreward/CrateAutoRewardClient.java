@@ -54,6 +54,7 @@ public final class CrateAutoRewardClient implements ClientModInitializer {
     private boolean usingPreset = false;
     private int creationAttempts = 0;
     private Screen creationScreen = null;
+    private long updaterTicks = 0;
 
     @Override public void onInitializeClient() {
         toggle = KeyMappingHelper.registerKeyMapping(new KeyMapping(
@@ -86,6 +87,7 @@ public final class CrateAutoRewardClient implements ClientModInitializer {
             while(toggle.consumeClick()) {
                 if(phase==Phase.OFF) start(mc); else stop(mc,"หยุดการทำงานแล้ว");
             }
+            ModUpdater.INSTANCE.tick(++updaterTicks);
             tick(mc);
         });
     }

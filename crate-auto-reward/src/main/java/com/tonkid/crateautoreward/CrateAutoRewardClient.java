@@ -93,11 +93,22 @@ public final class CrateAutoRewardClient implements ClientModInitializer {
             })
         );
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
-            while(presetKey.consumeClick()) openPresets(mc);
-            while(settingsKey.consumeClick()) openSettings(mc);
-            while(emergency.consumeClick()) if(phase!=Phase.OFF) stop(mc,"หยุดการทำงานแล้ว");
-            while(toggle.consumeClick()) {
-                if(phase==Phase.OFF) start(mc); else stop(mc,"หยุดการทำงานแล้ว");
+            // GUI keypresses are already handled by ScreenKeyboardEvents.
+            // KeyMapping.consumeClick may also receive the same press on some
+            // systems. Drain those counters while a GUI is open to avoid
+            // starting and immediately stopping the automation.
+            if(mc.gui.screen()==null){
+                while(presetKey.consumeClick()) openPresets(mc);
+                while(settingsKey.consumeClick()) openSettings(mc);
+                while(emergency.consumeClick()) if(phase!=Phase.OFF) stop(mc,"หยุดการทำงานแล้ว");
+                while(toggle.consumeClick()) {
+                    if(phase==Phase.OFF) start(mc); else stop(mc,"หยุดการทำงานแล้ว");
+                }
+            }else{
+                while(presetKey.consumeClick()){}
+                while(settingsKey.consumeClick()){}
+                while(emergency.consumeClick()){}
+                while(toggle.consumeClick()){}
             }
             ModUpdater.INSTANCE.tick(++updaterTicks);
             tick(mc);
@@ -164,7 +175,7 @@ public final class CrateAutoRewardClient implements ClientModInitializer {
         if(pending.isEmpty()){say(mc,"ไม่มีไอเทมให้เพิ่มรางวัล");return;}
         activeServerProfile=ServerProfiles.instance().key();
         phase = Phase.NEXT; phaseTicks = 0;
-        say(mc,"เริ่มดำเนินการ "+pending.size()+" ชนิด ("+skipped+" รายการซ้ำถูกข้าม) กดปุ่มหยุดเมื่อจำเป็น");
+        say(mc,"Auto-Crate v"+ModUpdater.INSTANCE.current()+" | เริ่ม "+pending.size()+" รายการ โปรไฟล์ "+ServerProfiles.instance().selected());
     }
 
     private void tick(Minecraft mc) {
@@ -673,7 +684,9 @@ public final class CrateAutoRewardClient implements ClientModInitializer {
             screen.getTitle().getString().toLowerCase(Locale.ROOT).contains("crate rewards");
     }
     private void stop(Minecraft mc,String reason) {
-        phase=Phase.OFF;pending.clear();active=ItemStack.EMPTY;sourceSlot=-1;say(mc,reason);
+        Phase last=phase;
+        phase=Phase.OFF;pending.clear();active=ItemStack.EMPTY;sourceSlot=-1;
+        say(mc,"หยุดที่ "+last+" | "+reason);
     }
     private static void say(Minecraft mc,String msg) {
         if (mc.player!=null) mc.player.sendSystemMessage(Component.literal("[Crate Auto Reward / "+ServerProfiles.instance().selected()+"] "+msg));

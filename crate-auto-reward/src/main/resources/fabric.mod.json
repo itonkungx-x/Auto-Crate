@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "crateautoreward",
+  "version": "${version}",
+  "name": "Crate Auto Reward",
+  "description": "Click inventory item on Anvil and select Item Reward in ExcellentCrates dialog.",
+  "authors": [
+    "TONKID"
+  ],
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.tonkid.crateautoreward.CrateAutoRewardClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "26.3",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}

@@ -68,7 +68,11 @@ public final class ModUpdater {
     public void automatic(boolean value) {
         automatic=value;
         save();
-        if(!value){ status="ปิดการติดตั้งอัตโนมัติแล้ว"; }
+        if(!value){
+            ready=false;
+            stageFile=null;
+            status="ปิดการติดตั้งอัตโนมัติแล้ว (ยกเลิกการติดตั้งที่รออยู่)";
+        }
         else if(updateExists && !ready && !checking){ check(true); }
     }
     public void tick(long ticks) {
@@ -222,7 +226,7 @@ public final class ModUpdater {
     }
     private void startHelperOnExit(){
         try{
-            if(!ready || !automatic || stageFile==null || !Files.isRegularFile(stageFile))return;
+            if(!ready || stageFile==null || !Files.isRegularFile(stageFile))return;
             Path oldJar=installedJar();
             if(!hexHash(stageFile).equals(stageSha))return;
             Path helper=STAGE.resolve("auto-crate-helper.jar");

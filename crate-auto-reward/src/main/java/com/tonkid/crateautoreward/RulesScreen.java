@@ -24,7 +24,7 @@ public final class RulesScreen extends Screen {
     }
     private int left(){return (this.width-Math.min(480,this.width-22))/2;}
     private int wide(){return Math.min(480,this.width-22);}
-    private int top(){return Math.max(8,(this.height-348)/2);}
+    private int top(){return Math.max(8,(this.height-378)/2);}
     private int contentWidth(){return wide()-32;}
     private static Component txt(String s){return Component.literal(s);}
     private Button btn(String s,int x,int y,int w,int h,Button.OnPress handler){
@@ -103,7 +103,9 @@ public final class RulesScreen extends Screen {
             Minecraft mc=Minecraft.getInstance();
             mc.gui.setScreen(new KeyBindsScreen(this,mc.options));
         });
-        btn("เสร็จสิ้น",x+w*75/100,t+311,w*25/100,22,b->onClose());
+        btn("อัปเดตม็อด",x+w*75/100,t+311,w*25/100,22,b->
+            Minecraft.getInstance().gui.setScreen(new UpdaterScreen(this)));
+        btn("เสร็จสิ้น",x,t+337,w,22,b->onClose());
     }
     private void setProfile(String mode){
         ServerProfiles.instance().select(mode);
@@ -137,8 +139,8 @@ public final class RulesScreen extends Screen {
     @Override public void extractBackground(GuiGraphicsExtractor g,int mx,int my,float dt){
         int x=left(),t=top(),w=wide();
         g.fillGradient(0,0,width,height,0xF2151925,0xF2080B12);
-        g.fill(x-2,t-2,x+w+2,t+348,0xFFED9843);
-        g.fill(x,t,x+w,t+346,0xFF151A24);
+        g.fill(x-2,t-2,x+w+2,t+378,0xFFED9843);
+        g.fill(x,t,x+w,t+376,0xFF151A24);
         g.fillGradient(x,t,x+w,t+47,0xFF303A4C,0xFF222A37);
         g.fill(x,t+46,x+w,t+48,0xFFFFA84E);
         g.fill(x+10,t+154,x+w-10,t+278,0xFF0D121B);
@@ -154,7 +156,7 @@ public final class RulesScreen extends Screen {
         g.text(font,"Weight",x+w*76/100,t+65,0xFFCDD5E0,false);
         g.text(font,"รายการกฎ — เรียงจากสำคัญมากไปน้อย",x,t+144,GOLD,false);
         g.text(font,"หน้า "+(page+1)+" / "+Math.max(1,(config.rules.size()+4)/5),x,t+302,0xFF92A2B6,false);
-        g.text(font,message,x,t+337,error?0xFFFF7878:0xFFABD2A2,false);
+        g.text(font,message,x,t+363,error?0xFFFF7878:0xFFABD2A2,false);
     }
     @Override public void onClose(){
         config.save();

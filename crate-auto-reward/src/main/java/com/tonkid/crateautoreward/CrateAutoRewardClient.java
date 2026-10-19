@@ -488,9 +488,12 @@ public final class CrateAutoRewardClient implements ClientModInitializer {
         }
 
         Dialog model=readDialog(current);
-        if(!(model instanceof SimpleDialog form) || !(current instanceof DialogScreen<?> dialogScreen)){
-            say(mc,"ข้อมูลหน้าต่าง: "+(model==null?"ไม่มี":model.getClass().getSimpleName()));
-            stop(mc,"ไม่พบ SimpleDialog ที่เซิร์ฟเวอร์ส่งมา");
+        // ExcellentCrates RewardWeightDialog uses DialogTypes.multiAction(OK)
+        // even though its body contains inputs. It is NOT a SimpleDialog.
+        if(!(model instanceof MultiActionDialog form) ||
+           !(current instanceof DialogScreen<?> dialogScreen)){
+            say(mc,"ชนิด Dialog: "+(model==null?"ไม่มี":model.getClass().getSimpleName()));
+            stop(mc,"ไม่พบ MultiActionDialog Rarity & Weight ของ ExcellentCrates");
             return;
         }
 
@@ -577,7 +580,7 @@ public final class CrateAutoRewardClient implements ClientModInitializer {
 
         // Confirm via ActionButton; it binds all registered input value getters.
         ActionButton submit=null;
-        for(ActionButton choice:form.mainActions()){
+        for(ActionButton choice:form.actions()){
             String label=RuleConfig.normalize(choice.button().label().getString()).trim();
             if(label.equals("ok") || label.endsWith(" ok") ||
                 label.contains("confirm") || label.equals("done") ||
@@ -586,7 +589,7 @@ public final class CrateAutoRewardClient implements ClientModInitializer {
                 submit=choice;
             }
         }
-        if(submit==null && form.mainActions().size()==1)submit=form.mainActions().get(0);
+        if(submit==null && form.actions().size()==1)submit=form.actions().get(0);
         if(submit==null){
             stop(mc,"หา ActionButton ยืนยัน Rarity/Weight ไม่พบ");
             return;
@@ -594,8 +597,8 @@ public final class CrateAutoRewardClient implements ClientModInitializer {
         try{
             Button ok=formControls.createActionButton(submit).build();
             ok.onPress(new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT,0));
-            say(mc,"ส่งค่า Rarity="+options.entries().get(target).id()+
-                " Weight="+currentRule.weight+" ไปเซิร์ฟเวอร์ (จาก Dialog inputs)");
+            say(mc,"ส่งข้อมูล Rarity="+options.entries().get(target).id()+
+                " Weight="+currentRule.weight+" ผ่าน MultiActionDialog ปุ่ม OK");
             phase=Phase.RETURN_OPTIONS;
             phaseTicks=0;
         }catch(Exception error){

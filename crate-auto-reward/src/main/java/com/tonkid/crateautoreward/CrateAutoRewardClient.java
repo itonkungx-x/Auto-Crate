@@ -13,6 +13,10 @@ import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.dialog.DialogScreen;
+import net.minecraft.client.gui.screens.dialog.DialogControlSet;
+import net.minecraft.server.dialog.MultiActionDialog;
+import net.minecraft.server.dialog.ActionButton;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.input.MouseButtonInfo;
@@ -229,148 +233,105 @@ public final class CrateAutoRewardClient implements ClientModInitializer {
         return title.contains("reward") && title.contains("creation");
     }
 
-    private static List<Button> dialogButtons(Screen screen){
-        LinkedHashSet<Button> found=new LinkedHashSet<>();
-        for(var child:screen.children()){
-            if(child instanceof Button button && button.active && button.visible)found.add(button);
+    /**
+     * The actual action buttons in Minecraft 26.3 MultiButtonDialogScreen are
+     * generated from MultiActionDialog.actions() and may not be exposed through
+     * Screen.children(). Access the model, not the GUI's Back/Warning buttons.
+     */
+    private static MultiActionDialog creationDialog(Screen screen) {
+        if (!(screen instanceof DialogScreen<?>)) return null;
+        try {
+            Field model=DialogScreen.class.getDeclaredField("dialog");
+            model.setAccessible(true);
+            Object value=model.get(screen);
+            return value instanceof MultiActionDialog multi ? multi : null;
+        } catch (ReflectiveOperationException | RuntimeException error) {
+            return null;
         }
-        // Different 26.3 DialogScreen implementations may expose actions
-        // as renderables instead of the normal event listener collection.
-        for(Class<?> clazz=screen.getClass();clazz!=null;clazz=clazz.getSuperclass()){
-            for(Field field:clazz.getDeclaredFields()){
-                if(!Iterable.class.isAssignableFrom(field.getType()))continue;
-                try{
-                    field.setAccessible(true);
-                    Object value=field.get(screen);
-                    if(value instanceof Iterable<?> list){
-                        for(Object o:list)
-                            if(o instanceof Button btn && btn.visible && btn.active)found.add(btn);
-                    }
-                }catch(ReflectiveOperationException | RuntimeException ignored){}
-            }
-        }
-        return new ArrayList<>(found);
     }
 
-    private static Button itemRewardButton(Screen screen,List<Button> buttons){
-        // First use the actual ActionButton label. This is the safest selector.
-        Button match=null;
-        for(Button b:buttons){
-            String message=RuleConfig.normalize(b.getMessage().getString());
-            if(!message.contains("item reward"))continue;
-            if(match!=null)return null;
-            match=b;
+    private static String actionLabels(MultiActionDialog dialog){
+        if(dialog==null) return "ไม่มีข้อมูล MultiActionDialog";
+        StringBuilder info=new StringBuilder();
+        for(ActionButton option:dialog.actions()) {
+            if(info.length()>150)break;
+            info.append("[").append(option.button().label().getString()).append("] ");
         }
-        if(match!=null)return match;
-
-        // A translated or wrapped label: identify the exact two action buttons
-        // as a same-row pair and choose the LEFT one. Do not select Back.
-        List<Button> candidates=new ArrayList<>();
-        for(Button b:buttons){
-            String text=RuleConfig.normalize(b.getMessage().getString());
-            if(text.contains("back")||text.contains("กลับ")||text.contains("ย้อน"))continue;
-            if(b.getWidth()<55||b.getY()<screen.height/8||
-               b.getY()>screen.height*3/4)continue;
-            candidates.add(b);
-        }
-        Button best=null;
-        int pairs=0;
-        for(Button left:candidates)for(Button right:candidates){
-            if(left==right)continue;
-            if(left.getX()>=right.getX() ||
-               Math.abs(left.getY()-right.getY())>6 ||
-               Math.abs(left.getWidth()-right.getWidth())>18 ||
-               left.getX()+left.getWidth()>right.getX()+14)continue;
-            // Both actions are near the middle of screen and adjacent.
-            if(left.getX()<screen.width/8 || right.getX()>screen.width*7/8 ||
-               left.getY()>screen.height*2/3)continue;
-            pairs++;
-            best=left;
-        }
-        return pairs==1?best:null;
+        return info.toString();
     }
 
-    private static String actionDiagnostics(Screen screen,List<Button> buttons){
-        StringBuilder details=new StringBuilder(screen.getClass().getSimpleName())
-            .append(" | buttons=").append(buttons.size());
-        for(int i=0;i<Math.min(buttons.size(),6);i++){
-            Button btn=buttons.get(i);
-            String label=btn.getMessage().getString();
-            if(label.length()>35)label=label.substring(0,35);
-            details.append(" [").append(i).append(":").append(label)
-                .append(" @").append(btn.getX()).append(",").append(btn.getY()).append("]");
+    private static ActionButton itemAction(MultiActionDialog dialog){
+        ActionButton chosen=null;
+        for(ActionButton option:dialog.actions()){
+            String label=RuleConfig.normalize(option.button().label().getString());
+            if(!label.contains("item reward"))continue;
+            if(chosen!=null)return null;
+            chosen=option;
         }
-        return details.toString();
+        return chosen;
     }
 
     private void clickItemReward(Minecraft mc){
         Screen screen=mc.gui.screen();
         if(screen==null){
-            if(phaseTicks>60)stop(mc,"ไม่มีหน้าต่าง REWARD Creation");
+            if(phaseTicks>70)stop(mc,"ไม่พบ REWARD Creation");
             return;
         }
         if(rewards(screen)){
             phase=Phase.RETURN;phaseTicks=0;return;
         }
         if(!isCreationDialog(screen)){
-            if(phaseTicks>100)stop(mc,"ไม่พบหน้าต่าง REWARD Creation: "+screen.getClass().getSimpleName());
+            if(phaseTicks>80)stop(mc,"หน้าจอไม่ใช่ REWARD Creation: "+screen.getClass().getSimpleName());
             return;
         }
         if(phaseTicks<10)return;
 
-        List<Button> buttons=dialogButtons(screen);
-        Button action=itemRewardButton(screen,buttons);
-        if(action==null){
+        MultiActionDialog dialog=creationDialog(screen);
+        ActionButton target=dialog==null?null:itemAction(dialog);
+        if(target==null){
             if(phaseTicks>30){
-                say(mc,"วิเคราะห์หน้าต่าง: "+actionDiagnostics(screen,buttons));
-                stop(mc,"ตรวจจับปุ่ม Item Reward ไม่ได้ จึงไม่คลิกตำแหน่งแบบสุ่ม");
+                say(mc,"ตัวเลือกใน Dialog: "+actionLabels(dialog));
+                stop(mc,"ไม่พบ Action Item Reward ในข้อมูลของเซิร์ฟเวอร์ จึงหยุด");
             }
             return;
         }
-        if(creationAttempts>=2){
-            stop(mc,"กด Item Reward แล้ว แต่เซิร์ฟเวอร์ยังไม่กลับหน้า Crate Rewards");
+        if(creationAttempts!=0) {
+            stop(mc,"ส่ง Item Reward ไปแล้ว 1 ครั้ง ยังไม่ได้รับผลตอบกลับ (ไม่ส่งซ้ำเพื่อป้องกันรางวัลซ้ำ)");
             return;
         }
-
-        // This executes the real server-dialog ActionButton callback. Unlike
-        // screen.mouseClicked(), it cannot be consumed by a parent container
-        // without dispatching the button's action.
-        try{
+        try {
+            // Vanilla uses this factory internally: the returned Button has an
+            // action callback bound to DialogScreen.runAction / the server.
+            DialogControlSet controls=new DialogControlSet((DialogScreen<?>)screen);
+            Button button=controls.createActionButton(target).build();
+            creationAttempts=1;
             creationScreen=screen;
-            creationAttempts++;
-            action.onPress(new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT,0));
-            say(mc,"ส่ง ActionButton: "+action.getMessage().getString()+
-                " | ครั้งที่ "+creationAttempts+" (รอเซิร์ฟเวอร์ตอบกลับ)");
+            button.onPress(new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT,0));
+            say(mc,"ส่ง Item Reward จาก MultiActionDialog แล้ว รอเซิร์ฟเวอร์ตอบกลับ...");
             phase=Phase.WAIT_CREATE;phaseTicks=0;
-        }catch(Exception ex){
-            stop(mc,"กด ActionButton ไม่สำเร็จ: "+ex.getClass().getSimpleName());
+        }catch(Exception error){
+            stop(mc,"เรียก Item Reward Action ไม่สำเร็จ: "+error.getClass().getSimpleName()+
+                " "+(error.getMessage()==null?"":error.getMessage()));
         }
     }
 
     private void awaitCreation(Minecraft mc){
         Screen screen=mc.gui.screen();
         if(rewards(screen)){
-            say(mc,"เซิร์ฟเวอร์ตอบกลับแล้ว: กลับไปหน้า Crate Rewards");
-            phase=Phase.RETURN;phaseTicks=0;
-            return;
+            say(mc,"สร้าง Item Reward สำเร็จและกลับสู่ Crate Rewards");
+            phase=Phase.RETURN;phaseTicks=0;return;
         }
         if(screen==null){
-            if(phaseTicks>90)stop(mc,"หน้าต่างหายไป แต่ Crate Rewards ไม่เปิด");
+            if(phaseTicks>110)stop(mc,"Dialog ปิดแล้ว แต่ Crate Rewards ไม่เปิด");
             return;
         }
         if(!isCreationDialog(screen)){
-            if(phaseTicks>90)stop(mc,"หน้าต่างเปลี่ยน แต่ไม่ใช่ Crate Rewards: "+
-                screen.getClass().getSimpleName());
+            if(phaseTicks>110)stop(mc,"หน้าจอเปลี่ยนแต่ไม่ใช่ Crate Rewards: "+screen.getClass().getSimpleName());
             return;
         }
-        if(phaseTicks>75){
-            if(creationAttempts>=2){
-                say(mc,"ActionButton ไม่ตอบสนอง | "+actionDiagnostics(screen,dialogButtons(screen)));
-                stop(mc,"ลองกด 2 ครั้งแล้ว ยังอยู่หน้า Creation; กรุณาส่ง log");
-            }else{
-                say(mc,"ยังอยู่หน้า Creation ลองส่ง ActionButton อีกครั้ง");
-                phase=Phase.TYPE;phaseTicks=10;
-            }
+        if(phaseTicks>120){
+            say(mc,"Action ที่ส่ง: "+actionLabels(creationDialog(screen)));
+            stop(mc,"เซิร์ฟเวอร์ยังไม่ปิดหน้า Creation; หยุดโดยไม่กดซ้ำ");
         }
     }
 

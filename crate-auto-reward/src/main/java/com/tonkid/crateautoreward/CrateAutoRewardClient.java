@@ -246,7 +246,7 @@ public final class CrateAutoRewardClient implements ClientModInitializer {
                         for(Object o:list)
                             if(o instanceof Button btn && btn.visible && btn.active)found.add(btn);
                     }
-                }catch(ReflectiveOperationException | SecurityException | RuntimeException ignored){}
+                }catch(ReflectiveOperationException | RuntimeException ignored){}
             }
         }
         return new ArrayList<>(found);

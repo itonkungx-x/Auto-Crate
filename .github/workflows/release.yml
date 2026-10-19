@@ -43,6 +43,25 @@ jobs:
           sha256sum "$JAR" > "${JAR}.sha256"
           echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
           echo "jar=$JAR" >> "$GITHUB_OUTPUT"
+      - name: Smoke test detached JAR replacement helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^mod_version=//p' crate-auto-reward/gradle.properties)"
+          JAR="crate-auto-reward/build/libs/crate-auto-reward-26.3-${VERSION}.jar"
+          WORK="$(mktemp -d)"
+          mkdir -p "$WORK/mods" "$WORK/stage"
+          cp "$JAR" "$WORK/mods/CrateAutoReward.jar"
+          cp "$JAR" "$WORK/stage/CrateAutoReward.jar.pending"
+          SHA="$(sha256sum "$JAR" | cut -d' ' -f1)"
+          java -cp "$JAR" com.tonkid.crateautoreward.ModSwapHelper \
+            999999999 "$WORK/mods/CrateAutoReward.jar" \
+            "$WORK/stage/CrateAutoReward.jar.pending" "$SHA" "$VERSION" \
+            "$WORK/stage/update.log" AutoCrateVerifiedUpdate
+          test -s "$WORK/mods/CrateAutoReward.jar.backup"
+          test -s "$WORK/stage/update.log"
+          cmp "$JAR" "$WORK/mods/CrateAutoReward.jar"
+          echo "Standalone updater smoke test passed"
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

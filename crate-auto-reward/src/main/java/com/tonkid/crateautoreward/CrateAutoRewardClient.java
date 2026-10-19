@@ -498,7 +498,9 @@ public final class CrateAutoRewardClient implements ClientModInitializer {
         // ExcellentCrates form with one Rarity selector and one Weight input.
         Input rarityInput=null,weightInput=null;
         for(Input input:model.common().inputs()){
-            String name=RuleConfig.normalize(input.key()+" "+input.control().label().getString());
+            String label=input.control() instanceof TextInput t ? t.label().getString() :
+                input.control() instanceof SingleOptionInput o ? o.label().getString() : "";
+            String name=RuleConfig.normalize(input.key()+" "+label);
             if(input.control() instanceof SingleOptionInput &&
                 (name.contains("rarity") || name.contains("rari"))){
                 if(rarityInput!=null){stop(mc,"มีช่อง Rarity มากกว่า 1 ช่อง");return;}

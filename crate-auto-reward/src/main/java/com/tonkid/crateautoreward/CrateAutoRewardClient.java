@@ -469,104 +469,160 @@ public final class CrateAutoRewardClient implements ClientModInitializer {
     // ExcellentCrates 7 / 26.3 renders the single-option selector as an ordinary
     // clickable button labelled "Rarity: COMMON", not necessarily CycleButton.
     // On each click the server dialog cycles to the next configured rarity.
+    /**
+     * Minecraft 26.3 creates text and single-option dialog controls through
+     * DialogControlSet. They can be NESTED inside layout/scroll containers,
+     * so Screen.children() alone is not sufficient.
+     */
+    private static List<AbstractWidget> findDialogWidgets(Screen screen) {
+        java.util.IdentityHashMap<Object,Boolean> visited=new java.util.IdentityHashMap<>();
+        LinkedHashSet<AbstractWidget> widgets=new LinkedHashSet<>();
+        crawlDialog(screen,0,visited,widgets);
+        return new ArrayList<>(widgets);
+    }
+
+    private static void crawlDialog(Object object,int depth,
+        java.util.IdentityHashMap<Object,Boolean> visited,
+        LinkedHashSet<AbstractWidget> widgets) {
+        if(object==null || depth>9 || visited.size()>700 || visited.put(object,Boolean.TRUE)!=null) return;
+        if(object instanceof AbstractWidget widget && widget.visible)widgets.add(widget);
+
+        if(object instanceof java.lang.Iterable<?> iterable) {
+            int n=0;
+            for(Object child:iterable) {
+                if(n++>180)break;
+                crawlDialog(child,depth+1,visited,widgets);
+            }
+            return;
+        }
+        if(object instanceof net.minecraft.client.gui.components.events.ContainerEventHandler parent) {
+            for(var child:parent.children()) crawlDialog(child,depth+1,visited,widgets);
+        }
+        Class<?> actual=object.getClass();
+        String type=actual.getName();
+        // Never walk back into Minecraft, network connections, item registries etc.
+        if(!type.startsWith("net.minecraft.client.gui."))return;
+        for(Class<?> clazz=actual;clazz!=null && clazz!=Object.class;clazz=clazz.getSuperclass()){
+            String owner=clazz.getName();
+            if(!owner.startsWith("net.minecraft.client.gui."))break;
+            for(Field field:clazz.getDeclaredFields()){
+                if(java.lang.reflect.Modifier.isStatic(field.getModifiers()))continue;
+                if(field.getType().isPrimitive())continue;
+                String name=field.getName().toLowerCase(Locale.ROOT);
+                if(name.contains("previous")||name.contains("connection")||
+                   name.contains("minecraft")||name.equals("parent")||
+                   name.equals("client")||name.contains("renderer")||
+                   name.contains("narration")||name.contains("hover")) continue;
+                try {
+                    field.setAccessible(true);
+                    Object child=field.get(object);
+                    if(child==null || child==object)continue;
+                    if(child instanceof AbstractWidget ||
+                       child instanceof java.lang.Iterable<?> ||
+                       child instanceof net.minecraft.client.gui.components.events.ContainerEventHandler ||
+                       child.getClass().getName().startsWith("net.minecraft.client.gui.")){
+                        crawlDialog(child,depth+1,visited,widgets);
+                    }
+                }catch(ReflectiveOperationException | RuntimeException ignored){}
+            }
+        }
+    }
+
+    private static String describeDialogWidgets(List<AbstractWidget> widgets) {
+        StringBuilder text=new StringBuilder();
+        for(AbstractWidget w:widgets){
+            if(text.length()>270)break;
+            String label=w.getMessage().getString();
+            if(label.length()>35)label=label.substring(0,35);
+            text.append(w.getClass().getSimpleName()).append("(")
+                .append(label).append(") ");
+        }
+        return text.toString();
+    }
+
     private void setWeight(Minecraft mc) {
         Screen screen=mc.gui.screen();
-        if(screen==null){stop(mc,"หน้าตั้งค่าเรทปิดโดยไม่คาดคิด");return;}
-        if(phaseTicks>220){stop(mc,"ตั้งเรทไม่สำเร็จ: หมดเวลารอหน้า Rarity & Weight");return;}
+        if(screen==null){stop(mc,"หน้าตั้งค่า Rarity/Weight ถูกปิด");return;}
+        if(phaseTicks>240){stop(mc,"หมดเวลารอการตั้งค่า Rarity/Weight");return;}
         String title=RuleConfig.normalize(screen.getTitle().getString());
         if(!title.contains("weight") && !title.contains("rari")){
-            if(phaseTicks>25)stop(mc,"หน้าจอไม่ใช่ Rarity & Weight");
+            if(phaseTicks>30)stop(mc,"หน้าจอไม่ใช่ Rarity/Weight: "+title);
             return;
-        }
-        List<AbstractWidget> widgets=new ArrayList<>();
-        for(var child:screen.children())
-            if(child instanceof AbstractWidget w && w.visible && w.active)widgets.add(w);
-
-        // First set exactly one numeric weight field.
-        List<EditBox> fields=new ArrayList<>();
-        for(AbstractWidget w:widgets)if(w instanceof EditBox e)fields.add(e);
-        if(fields.size()!=1){
-            if(phaseTicks>50)stop(mc,"ไม่พบช่อง Weight เพียงช่องเดียว จึงหยุดเพื่อความปลอดภัย");
-            return;
-        }
-        EditBox weightInput=fields.get(0);
-        if(!edited){
-            weightInput.setValue(currentRule.weight);
-            edited=true;phaseTicks=0;
-            say(mc,"กรอก Weight: "+currentRule.weight);
-            return;
-        }
-        if(!weightInput.getValue().equals(currentRule.weight)){
-            stop(mc,"Weight ในหน้าต่างไม่ตรงกับกฎ กรุณาตรวจสอบ");return;
         }
 
-        // Locate the label directly, e.g. "Rarity: COMMON" or "Rarity: ᴍʏᴛʜɪᴄ".
-        // Only click an unambiguous selector; never blindly click a dialog area.
-        AbstractWidget rarityButton=null;
-        for(AbstractWidget w:widgets){
-            if(w instanceof EditBox)continue;
-            String label=RuleConfig.normalize(w.getMessage().getString());
-            if(label.startsWith("rarity:") || label.startsWith("rarity ") ||
-               label.startsWith("rarity：")){
-                if(rarityButton!=null){stop(mc,"พบปุ่ม Rarity หลายปุ่ม กรุณาตรวจสอบ");return;}
-                rarityButton=w;
-            }
-        }
-        if(rarityButton==null){
+        List<AbstractWidget> widgets=findDialogWidgets(screen);
+        List<EditBox> textFields=new ArrayList<>();
+        for(AbstractWidget widget:widgets)if(widget instanceof EditBox box && box.active)textFields.add(box);
+
+        if(textFields.size()!=1) {
             if(phaseTicks>45){
-                StringBuilder labels=new StringBuilder();
-                for(AbstractWidget w:widgets){
-                    if(labels.length()>140)break;
-                    labels.append(w.getClass().getSimpleName()).append(" [")
-                        .append(w.getMessage().getString()).append("] ");
-                }
-                stop(mc,"ไม่พบปุ่ม Rarity: "+labels);
+                say(mc,"Widget diagnostic: "+describeDialogWidgets(widgets));
+                stop(mc,"พบช่อง Weight "+textFields.size()+" ช่อง (ต้องพบ 1 ช่อง) จึงหยุดเพื่อป้องกันการกรอกผิด");
             }
             return;
         }
-        String shown=RuleConfig.normalize(rarityButton.getMessage().getString());
-        String current=rarityName(shown.substring(Math.min(shown.length(),shown.indexOf(":")>=0?shown.indexOf(":")+1:7)).trim());
+        EditBox input=textFields.get(0);
+        if(!edited) {
+            input.setValue(currentRule.weight);
+            edited=true;phaseTicks=0;
+            say(mc,"กำหนด Weight เป็น "+currentRule.weight);
+            return;
+        }
+        if(!input.getValue().equals(currentRule.weight)) {
+            stop(mc,"ช่อง Weight ไม่เก็บค่าที่กรอกไว้ กรุณาส่งข้อความวินิจฉัย");return;
+        }
+
+        List<net.minecraft.client.gui.components.AbstractButton> selectors=new ArrayList<>();
+        for(AbstractWidget w:widgets){
+            if(!(w instanceof net.minecraft.client.gui.components.AbstractButton button) || !button.active)continue;
+            String text=RuleConfig.normalize(w.getMessage().getString()).trim();
+            if(text.startsWith("rarity:") || text.startsWith("rarity ") ||
+               text.startsWith("rarity：")) selectors.add(button);
+        }
+        if(selectors.size()!=1) {
+            if(phaseTicks>45){
+                say(mc,"Widget diagnostic: "+describeDialogWidgets(widgets));
+                stop(mc,"พบตัวเลือก Rarity "+selectors.size()+" ปุ่ม (ต้องพบ 1 ปุ่ม)");
+            }
+            return;
+        }
+        net.minecraft.client.gui.components.AbstractButton rarityButton=selectors.get(0);
+        String label=RuleConfig.normalize(rarityButton.getMessage().getString());
+        int delimiter=label.indexOf(':');
+        String current=rarityName(delimiter>=0?label.substring(delimiter+1):label.substring(Math.min(7,label.length())));
         String desired=rarityName(currentRule.rarity);
         if(!current.equals(desired)){
-            if(phaseTicks<9)return; // allow server/client to update the button label
-            if(cycles>=24){
-                stop(mc,"ไม่พบระดับ "+currentRule.rarity+" ในรายการ Rarity ของเซิร์ฟเวอร์");return;
-            }
-            String beforeClick=rarityButton.getMessage().getString();
-            if(!clickWidget(mc,screen,rarityButton)){
-                stop(mc,"คลิกปุ่ม Rarity ไม่สำเร็จ");return;
-            }
+            if(phaseTicks<10)return;
+            if(cycles>=20){stop(mc,"ไม่มี Rarity "+desired+" หลังลองเลื่อน "+cycles+" ครั้ง");return;}
+            String oldLabel=rarityButton.getMessage().getString();
+            rarityButton.onPress(new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT,0));
             cycles++;
             phaseTicks=0;
-            say(mc,"เปลี่ยน Rarity: "+beforeClick+" → เป้าหมาย "+currentRule.rarity+" ("+cycles+"/24)");
+            say(mc,"Rarity: "+oldLabel+" → ต้องการ "+currentRule.rarity+" ("+cycles+"/20)");
             return;
         }
 
-        // A delay separates final selector input from dialog submission.
         if(phaseTicks<10)return;
-        AbstractWidget confirm=null;
+        List<Button> confirms=new ArrayList<>();
         for(AbstractWidget w:widgets){
-            if(!(w instanceof Button) || w==rarityButton)continue;
-            String label=RuleConfig.normalize(w.getMessage().getString()).trim();
-            // The screenshot says "✔ Ok" rather than plain "Ok".
-            boolean ok=label.equals("ok") || label.endsWith(" ok") ||
-                label.equals("done") || label.endsWith(" done") ||
-                label.contains("confirm") || label.contains("save") ||
-                label.equals("ยืนยัน") || label.endsWith(" ยืนยัน");
-            if(ok){
-                if(confirm!=null){stop(mc,"พบปุ่มยืนยันซ้ำ กรุณาตรวจสอบ");return;}
-                confirm=w;
-            }
+            if(!(w instanceof Button btn) || btn==rarityButton || !btn.active)continue;
+            String name=RuleConfig.normalize(btn.getMessage().getString()).trim();
+            if(name.equals("ok") || name.endsWith(" ok") ||
+               name.equals("done") || name.endsWith(" done") ||
+               name.equals("save") || name.endsWith(" save") ||
+               name.equals("ยืนยัน") || name.endsWith(" ยืนยัน")) confirms.add(btn);
         }
-        if(confirm==null){
-            if(phaseTicks>55)stop(mc,"ไม่พบปุ่ม OK สำหรับบันทึกเรท");
+        if(confirms.size()!=1){
+            if(phaseTicks>50){
+                say(mc,"Widget diagnostic: "+describeDialogWidgets(widgets));
+                stop(mc,"พบปุ่มยืนยัน "+confirms.size()+" ปุ่ม (ต้องพบ 1 ปุ่ม)");
+            }
             return;
         }
-        if(!clickWidget(mc,screen,confirm)){
-            stop(mc,"คลิกปุ่ม OK ไม่สำเร็จ กรุณาตรวจสอบ");return;
-        }
-        say(mc,"กด OK แล้ว | Rarity "+currentRule.rarity+" / Weight "+currentRule.weight);
-        phase=Phase.RETURN_OPTIONS;phaseTicks=0;
+        confirms.get(0).onPress(new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT,0));
+        say(mc,"ส่งค่า Rarity "+currentRule.rarity+" / Weight "+currentRule.weight+" และกด OK แล้ว");
+        phase=Phase.RETURN_OPTIONS;
+        phaseTicks=0;
     }
 
     private static String rarityName(String text){

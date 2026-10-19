@@ -233,7 +233,8 @@ public final class ModUpdater {
             long gamePid=ProcessHandle.current().pid();
             new ProcessBuilder(java.toString(),"-cp",helper.toString(),
                 "com.tonkid.crateautoreward.ModSwapHelper",String.valueOf(gamePid),
-                oldJar.toString(),stageFile.toString(),stageSha,preparedVersion,log.toString())
+                oldJar.toString(),stageFile.toString(),stageSha,preparedVersion,log.toString(),
+                "AutoCrateVerifiedUpdate")
                 .redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile())).start();
         }catch(Exception e){System.err.println("[AutoCrate Updater] Could not start helper: "+e);}
     }

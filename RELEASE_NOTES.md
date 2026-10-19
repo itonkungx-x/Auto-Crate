@@ -1,13 +1,9 @@
-## Auto-Crate v0.6.0 — Fabric 26.3
+## Auto-Crate v0.6.1 — Item Reward button fix
 
-- Adds client-only GitHub Releases auto-updater with SHA-256 checks.
-- Shows update status and controls inside the Thai settings UI.
-- Supports automatic checks/downloads. The verified mod is replaced only after Minecraft exits, using a detached Java updater helper.
-- Automatically retains the previous JAR as a `.backup` file; MMO/SMP profiles and saved box presets are not modified.
-- No server plugin required.
+- Fixed automatic clicking of Item Reward in ExcellentCrates' `REWARD » Creation` dialog.
+- Dispatches the actual Minecraft dialog Button callback instead of simulating mouse clicks at guessed screen coordinates.
+- Confirms that the server returns to Crate Rewards before continuing; never reports success solely from a consumed mouse event.
+- Adds diagnostic control labels if the expected button is not present and limits retries.
+- All MMO/SMP presets, saved rule configurations, Thai UI, keybindings and GitHub auto-updater remain available.
 
-**First-time setup:** Replace the old v0.5.1 JAR with v0.6.0 once. Future releases will update without manual file replacement.
-
-**GitHub visibility:** To check and download releases without access tokens, the repository must be Public. This release is initially private until its owner changes visibility. The mod deliberately does not contain a GitHub token.
-
-After downloading, restart Minecraft to activate the updated code. Updates are validated using the release's `.sha256` asset and `fabric.mod.json` metadata.
+Test with one inexpensive reward first. For a live-server mismatch, send the chat lines starting with `[Crate Auto Reward]` so button metadata can guide a precise correction.

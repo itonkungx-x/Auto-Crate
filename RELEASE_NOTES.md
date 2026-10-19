@@ -1,9 +1,9 @@
-## Auto-Crate v0.6.2 — Rarity and Weight dialog controls
+## Auto-Crate v0.6.3 — Item Reward invisible action button fix
 
-- Fixes automatic Rarity/Weight configuration after Item Reward is successfully created.
-- Finds Minecraft 26.3 dialog controls recursively, including nested TextInput and SingleOption widgets.
-- Sets Weight to the configured number, cycles the Rarity button until it displays the desired level, then presses ✔ OK directly.
-- Adds detailed diagnostic information if a server GUI layout differs, rather than guessing or clicking other rewards.
-- Keeps the client-only mode, server MMO/SMP isolation, Presets, Thai UI, remappable keys and GitHub release updater.
+- Fixes **MultiButtonDialogScreen** where only Back and Warning appear in `Screen.children()`.
+- Reads the actual `MultiActionDialog.actions()` supplied by the server and finds the **Item Reward** action by label.
+- Invokes Minecraft's built-in `DialogControlSet.createActionButton` callback to submit the reward, without screen-coordinate guesses.
+- Waits for Crate Rewards to reopen. Submits the action only once to avoid accidentally creating duplicate rewards.
+- Preserves Thai UI, saved MMO/SMP profiles, rarity/weight rules, presets, and GitHub Releases auto-updater.
 
-First test one expendable reward and confirm both Rarity and Weight in ExcellentCrates. This version is compiled in CI but cannot be fully integration-tested against your live server in CI.
+**Live-server status:** Built and smoke-tested in CI, not yet validated with a real server dialog. Test one expendable item. If an action fails, send the in-game diagnostic message.

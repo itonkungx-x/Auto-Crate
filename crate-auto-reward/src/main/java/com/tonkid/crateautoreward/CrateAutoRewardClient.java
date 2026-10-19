@@ -229,128 +229,149 @@ public final class CrateAutoRewardClient implements ClientModInitializer {
         return title.contains("reward") && title.contains("creation");
     }
 
-    private static List<AbstractWidget> availableWidgets(Screen screen){
-        LinkedHashSet<AbstractWidget> all=new LinkedHashSet<>();
-        for(var listener:screen.children()){
-            if(listener instanceof AbstractWidget widget && widget.visible && widget.active)all.add(widget);
+    private static List<Button> dialogButtons(Screen screen){
+        LinkedHashSet<Button> found=new LinkedHashSet<>();
+        for(var child:screen.children()){
+            if(child instanceof Button button && button.active && button.visible)found.add(button);
         }
-        // Some versions of Minecraft DialogScreen register renderable controls
-        // separately from input listeners. Read that list as a second source.
-        try{
-            Field field=Screen.class.getDeclaredField("renderables");
-            field.setAccessible(true);
-            Object renderables=field.get(screen);
-            if(renderables instanceof Iterable<?> values){
-                for(Object value:values){
-                    if(value instanceof AbstractWidget widget && widget.visible && widget.active)all.add(widget);
-                }
-            }
-        }catch(ReflectiveOperationException | SecurityException ignored){}
-        return new ArrayList<>(all);
-    }
-
-    private static AbstractWidget findItemButton(Screen screen,List<AbstractWidget> controls){
-        AbstractWidget exact=null;
-        for(AbstractWidget w:controls){
-            if(!(w instanceof Button))continue;
-            String label=RuleConfig.normalize(w.getMessage().getString());
-            if(label.contains("item reward")){
-                if(exact!=null)return null; // Ambiguous buttons: do not guess.
-                exact=w;
+        // Different 26.3 DialogScreen implementations may expose actions
+        // as renderables instead of the normal event listener collection.
+        for(Class<?> clazz=screen.getClass();clazz!=null;clazz=clazz.getSuperclass()){
+            for(Field field:clazz.getDeclaredFields()){
+                if(!Iterable.class.isAssignableFrom(field.getType()))continue;
+                try{
+                    field.setAccessible(true);
+                    Object value=field.get(screen);
+                    if(value instanceof Iterable<?> list){
+                        for(Object o:list)
+                            if(o instanceof Button btn && btn.visible && btn.active)found.add(btn);
+                    }
+                }catch(ReflectiveOperationException | SecurityException | RuntimeException ignored){}
             }
         }
-        if(exact!=null)return exact;
-
-        // The two centered primary buttons are on the same row. Match geometry
-        // rather than the text component (which may be part of a dialog wrapper).
-        List<Button> buttons=new ArrayList<>();
-        for(AbstractWidget w:controls){
-            if(!(w instanceof Button b))continue;
-            String label=RuleConfig.normalize(b.getMessage().getString());
-            if(label.contains("back")||label.contains("กลับ")||label.contains("command reward"))continue;
-            if(b.getX()<0||b.getX()+b.getWidth()>screen.width||
-               b.getY()<screen.height/6||b.getY()>screen.height*3/4||b.getWidth()<70)continue;
-            buttons.add(b);
-        }
-        // Only choose a left/right pair when the layout clearly provides it.
-        for(Button a:buttons)for(Button b:buttons){
-            if(a==b || Math.abs(a.getY()-b.getY())>6)continue;
-            if(a.getX()+a.getWidth()<=b.getX()+12 && a.getX()<screen.width/2){
-                return a;
-            }
-        }
-        return null;
+        return new ArrayList<>(found);
     }
 
-    // Clicks through Minecraft's Screen API: no real mouse cursor is moved.
-    private static boolean clickAt(Minecraft mc,Screen screen,double x,double y){
-        MouseButtonInfo mouse=new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT,0);
-        MouseButtonEvent event=new MouseButtonEvent(x,y,mouse);
-        boolean accepted=screen.mouseClicked(event,false);
-        if(mc.gui.screen()==screen)screen.mouseReleased(event);
-        return accepted;
+    private static Button itemRewardButton(Screen screen,List<Button> buttons){
+        // First use the actual ActionButton label. This is the safest selector.
+        Button match=null;
+        for(Button b:buttons){
+            String message=RuleConfig.normalize(b.getMessage().getString());
+            if(!message.contains("item reward"))continue;
+            if(match!=null)return null;
+            match=b;
+        }
+        if(match!=null)return match;
+
+        // A translated or wrapped label: identify the exact two action buttons
+        // as a same-row pair and choose the LEFT one. Do not select Back.
+        List<Button> candidates=new ArrayList<>();
+        for(Button b:buttons){
+            String text=RuleConfig.normalize(b.getMessage().getString());
+            if(text.contains("back")||text.contains("กลับ")||text.contains("ย้อน"))continue;
+            if(b.getWidth()<55||b.getY()<screen.height/8||
+               b.getY()>screen.height*3/4)continue;
+            candidates.add(b);
+        }
+        Button best=null;
+        int pairs=0;
+        for(Button left:candidates)for(Button right:candidates){
+            if(left==right)continue;
+            if(left.getX()>=right.getX() ||
+               Math.abs(left.getY()-right.getY())>6 ||
+               Math.abs(left.getWidth()-right.getWidth())>18 ||
+               left.getX()+left.getWidth()>right.getX()+14)continue;
+            // Both actions are near the middle of screen and adjacent.
+            if(left.getX()<screen.width/8 || right.getX()>screen.width*7/8 ||
+               left.getY()>screen.height*2/3)continue;
+            pairs++;
+            best=left;
+        }
+        return pairs==1?best:null;
     }
 
-    private static final double[][] CREATION_COORDINATES={
-        // Client renderings of the same ExcellentCrates dialog place the left
-        // action at either ~39% or ~28% of the GUI height.
-        {0.38,0.39},{0.42,0.285},{0.38,0.36},{0.38,0.415},
-        {0.42,0.30},{0.38,0.335},{0.42,0.265},{0.38,0.44}
-    };
+    private static String actionDiagnostics(Screen screen,List<Button> buttons){
+        StringBuilder details=new StringBuilder(screen.getClass().getSimpleName())
+            .append(" | buttons=").append(buttons.size());
+        for(int i=0;i<Math.min(buttons.size(),6);i++){
+            Button btn=buttons.get(i);
+            String label=btn.getMessage().getString();
+            if(label.length()>35)label=label.substring(0,35);
+            details.append(" [").append(i).append(":").append(label)
+                .append(" @").append(btn.getX()).append(",").append(btn.getY()).append("]");
+        }
+        return details.toString();
+    }
 
     private void clickItemReward(Minecraft mc){
         Screen screen=mc.gui.screen();
-        if(screen==null){if(phaseTicks>60)stop(mc,"ไม่พบหน้าต่างสร้าง Reward");return;}
-        if(rewards(screen)){ // Already returned by the server.
+        if(screen==null){
+            if(phaseTicks>60)stop(mc,"ไม่มีหน้าต่าง REWARD Creation");
+            return;
+        }
+        if(rewards(screen)){
             phase=Phase.RETURN;phaseTicks=0;return;
         }
         if(!isCreationDialog(screen)){
-            if(phaseTicks>110)stop(mc,"ไม่พบหน้า REWARD » Creation: "+screen.getClass().getSimpleName());
+            if(phaseTicks>100)stop(mc,"ไม่พบหน้าต่าง REWARD Creation: "+screen.getClass().getSimpleName());
             return;
         }
-        if(phaseTicks<8)return;
-        creationScreen=screen;
-        List<AbstractWidget> widgets=availableWidgets(screen);
-        AbstractWidget target=findItemButton(screen,widgets);
-        boolean accepted;
-        if(target!=null && creationAttempts==0){
-            accepted=clickAt(mc,screen,target.getX()+target.getWidth()/2.0,
-                target.getY()+target.getHeight()/2.0);
-            say(mc,"ทดลองกด Item Reward ตามตำแหน่งปุ่ม GUI");
-        }else{
-            int index=target!=null?creationAttempts-1:creationAttempts;
-            if(index>=CREATION_COORDINATES.length){
-                stop(mc,"ไม่พบปุ่ม Item Reward | ลองคลิกด้วยตนเองและแจ้งภาพหน้าจอ");return;
+        if(phaseTicks<10)return;
+
+        List<Button> buttons=dialogButtons(screen);
+        Button action=itemRewardButton(screen,buttons);
+        if(action==null){
+            if(phaseTicks>30){
+                say(mc,"วิเคราะห์หน้าต่าง: "+actionDiagnostics(screen,buttons));
+                stop(mc,"ตรวจจับปุ่ม Item Reward ไม่ได้ จึงไม่คลิกตำแหน่งแบบสุ่ม");
             }
-            double[] xy=CREATION_COORDINATES[index];
-            accepted=clickAt(mc,screen,screen.width*xy[0],screen.height*xy[1]);
-            say(mc,"ทดลองกดปุ่ม Item Reward ("+(creationAttempts+1)+")");
+            return;
         }
-        creationAttempts++;
-        // IMPORTANT: accepted from mouseClicked DOES NOT prove reward creation.
-        // It may only mean a dialog container consumed the mouse event.
-        phase=Phase.WAIT_CREATE;
-        phaseTicks=0;
+        if(creationAttempts>=2){
+            stop(mc,"กด Item Reward แล้ว แต่เซิร์ฟเวอร์ยังไม่กลับหน้า Crate Rewards");
+            return;
+        }
+
+        // This executes the real server-dialog ActionButton callback. Unlike
+        // screen.mouseClicked(), it cannot be consumed by a parent container
+        // without dispatching the button's action.
+        try{
+            creationScreen=screen;
+            creationAttempts++;
+            action.onPress(new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT,0));
+            say(mc,"ส่ง ActionButton: "+action.getMessage().getString()+
+                " | ครั้งที่ "+creationAttempts+" (รอเซิร์ฟเวอร์ตอบกลับ)");
+            phase=Phase.WAIT_CREATE;phaseTicks=0;
+        }catch(Exception ex){
+            stop(mc,"กด ActionButton ไม่สำเร็จ: "+ex.getClass().getSimpleName());
+        }
     }
 
     private void awaitCreation(Minecraft mc){
         Screen screen=mc.gui.screen();
         if(rewards(screen)){
-            say(mc,"สร้าง Item Reward แล้ว หน้า Crate Rewards กลับมา");
-            phase=Phase.RETURN;phaseTicks=0;return;
-        }
-        if(screen!=null && !isCreationDialog(screen) && phaseTicks>75){
-            stop(mc,"หน้าจอเปลี่ยนแล้วแต่ไม่ใช่ Crate Rewards: "+screen.getClass().getSimpleName());
+            say(mc,"เซิร์ฟเวอร์ตอบกลับแล้ว: กลับไปหน้า Crate Rewards");
+            phase=Phase.RETURN;phaseTicks=0;
             return;
         }
-        if(phaseTicks>36 && isCreationDialog(screen)){
-            // Never claim success while the creation dialog is still visible.
-            if(creationAttempts>=CREATION_COORDINATES.length+1){
-                stop(mc,"ปุ่ม Item Reward ไม่ตอบสนอง กรุณากดด้วยตนเอง");return;
-            }
-            phase=Phase.TYPE;phaseTicks=8;
+        if(screen==null){
+            if(phaseTicks>90)stop(mc,"หน้าต่างหายไป แต่ Crate Rewards ไม่เปิด");
+            return;
         }
-        if(phaseTicks>160)stop(mc,"ส่งการคลิกแล้ว แต่ไม่พบหน้า Crate Rewards ภายในเวลาที่กำหนด");
+        if(!isCreationDialog(screen)){
+            if(phaseTicks>90)stop(mc,"หน้าต่างเปลี่ยน แต่ไม่ใช่ Crate Rewards: "+
+                screen.getClass().getSimpleName());
+            return;
+        }
+        if(phaseTicks>75){
+            if(creationAttempts>=2){
+                say(mc,"ActionButton ไม่ตอบสนอง | "+actionDiagnostics(screen,dialogButtons(screen)));
+                stop(mc,"ลองกด 2 ครั้งแล้ว ยังอยู่หน้า Creation; กรุณาส่ง log");
+            }else{
+                say(mc,"ยังอยู่หน้า Creation ลองส่ง ActionButton อีกครั้ง");
+                phase=Phase.TYPE;phaseTicks=10;
+            }
+        }
     }
 
     private void returned(Minecraft mc) {

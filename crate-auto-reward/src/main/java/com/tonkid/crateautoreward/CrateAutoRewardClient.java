@@ -15,6 +15,14 @@ import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.dialog.DialogScreen;
 import net.minecraft.client.gui.screens.dialog.DialogControlSet;
+import net.minecraft.client.gui.layouts.LayoutElement;
+import net.minecraft.server.dialog.Dialog;
+import net.minecraft.server.dialog.SimpleDialog;
+import net.minecraft.server.dialog.Input;
+import net.minecraft.server.dialog.ActionButton;
+import net.minecraft.server.dialog.input.TextInput;
+import net.minecraft.server.dialog.input.SingleOptionInput;
+import net.minecraft.client.gui.screens.dialog.DialogControlSet;
 import net.minecraft.server.dialog.MultiActionDialog;
 import net.minecraft.server.dialog.ActionButton;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -435,155 +443,162 @@ public final class CrateAutoRewardClient implements ClientModInitializer {
      * DialogControlSet. They can be NESTED inside layout/scroll containers,
      * so Screen.children() alone is not sufficient.
      */
-    private static List<AbstractWidget> findDialogWidgets(Screen screen) {
-        java.util.IdentityHashMap<Object,Boolean> visited=new java.util.IdentityHashMap<>();
-        LinkedHashSet<AbstractWidget> widgets=new LinkedHashSet<>();
-        crawlDialog(screen,0,visited,widgets);
-        return new ArrayList<>(widgets);
-    }
-
-    private static void crawlDialog(Object object,int depth,
-        java.util.IdentityHashMap<Object,Boolean> visited,
-        LinkedHashSet<AbstractWidget> widgets) {
-        if(object==null || depth>9 || visited.size()>700 || visited.put(object,Boolean.TRUE)!=null) return;
-        if(object instanceof AbstractWidget widget && widget.visible)widgets.add(widget);
-
-        if(object instanceof java.lang.Iterable<?> iterable) {
-            int n=0;
-            for(Object child:iterable) {
-                if(n++>180)break;
-                crawlDialog(child,depth+1,visited,widgets);
-            }
-            return;
-        }
-        if(object instanceof net.minecraft.client.gui.components.events.ContainerEventHandler parent) {
-            for(var child:parent.children()) crawlDialog(child,depth+1,visited,widgets);
-        }
-        Class<?> actual=object.getClass();
-        String type=actual.getName();
-        // Never walk back into Minecraft, network connections, item registries etc.
-        if(!type.startsWith("net.minecraft.client.gui."))return;
-        for(Class<?> clazz=actual;clazz!=null && clazz!=Object.class;clazz=clazz.getSuperclass()){
-            String owner=clazz.getName();
-            if(!owner.startsWith("net.minecraft.client.gui."))break;
-            for(Field field:clazz.getDeclaredFields()){
-                if(java.lang.reflect.Modifier.isStatic(field.getModifiers()))continue;
-                if(field.getType().isPrimitive())continue;
-                String name=field.getName().toLowerCase(Locale.ROOT);
-                if(name.contains("previous")||name.contains("connection")||
-                   name.contains("minecraft")||name.equals("parent")||
-                   name.equals("client")||name.contains("renderer")||
-                   name.contains("narration")||name.contains("hover")) continue;
-                try {
-                    field.setAccessible(true);
-                    Object child=field.get(object);
-                    if(child==null || child==object)continue;
-                    if(child instanceof AbstractWidget ||
-                       child instanceof java.lang.Iterable<?> ||
-                       child instanceof net.minecraft.client.gui.components.events.ContainerEventHandler ||
-                       child.getClass().getName().startsWith("net.minecraft.client.gui.")){
-                        crawlDialog(child,depth+1,visited,widgets);
-                    }
-                }catch(ReflectiveOperationException | RuntimeException ignored){}
-            }
+    private static Dialog readDialog(Screen screen){
+        if(!(screen instanceof DialogScreen<?>))return null;
+        try{
+            Field field=DialogScreen.class.getDeclaredField("dialog");
+            field.setAccessible(true);
+            Object model=field.get(screen);
+            return model instanceof Dialog d ? d : null;
+        }catch(ReflectiveOperationException | RuntimeException error){
+            return null;
         }
     }
 
-    private static String describeDialogWidgets(List<AbstractWidget> widgets) {
-        StringBuilder text=new StringBuilder();
-        for(AbstractWidget w:widgets){
-            if(text.length()>270)break;
-            String label=w.getMessage().getString();
-            if(label.length()>35)label=label.substring(0,35);
-            text.append(w.getClass().getSimpleName()).append("(")
-                .append(label).append(") ");
+    private static String describeInputModel(Dialog dialog){
+        if(dialog==null)return "ไม่พบข้อมูล Dialog";
+        StringBuilder result=new StringBuilder();
+        for(Input input:dialog.common().inputs()){
+            result.append(input.key()).append(" = ")
+                .append(input.control().getClass().getSimpleName()).append("; ");
         }
-        return text.toString();
+        return result.toString();
     }
 
-    private void setWeight(Minecraft mc) {
-        Screen screen=mc.gui.screen();
-        if(screen==null){stop(mc,"หน้าตั้งค่า Rarity/Weight ถูกปิด");return;}
-        if(phaseTicks>240){stop(mc,"หมดเวลารอการตั้งค่า Rarity/Weight");return;}
-        String title=RuleConfig.normalize(screen.getTitle().getString());
+    private static boolean matchesRarity(SingleOptionInput.Entry entry,String wanted){
+        return rarityName(entry.id()).equals(wanted) ||
+            rarityName(entry.displayOrDefault().getString()).equals(wanted);
+    }
+
+    /**
+     * Server dialogs expose their actual Input definitions in
+     * dialog.common().inputs(). Widget instances are often absent from
+     * Screen.children(). Build a coordinated DialogControlSet from that model:
+     * the field getters then travel WITH the selected OK ActionButton.
+     */
+    private void setWeight(Minecraft mc){
+        Screen current=mc.gui.screen();
+        if(current==null){stop(mc,"หน้าตั้งค่า Rarity/Weight ปิดไปแล้ว");return;}
+        if(phaseTicks<12)return;
+        if(phaseTicks>160){stop(mc,"รอตั้งค่า Rarity/Weight นานเกินไป");return;}
+        String title=RuleConfig.normalize(current.getTitle().getString());
         if(!title.contains("weight") && !title.contains("rari")){
-            if(phaseTicks>30)stop(mc,"หน้าจอไม่ใช่ Rarity/Weight: "+title);
+            if(phaseTicks>30)stop(mc,"หน้าจอไม่ตรงกับ Rarity & Weight");
             return;
         }
 
-        List<AbstractWidget> widgets=findDialogWidgets(screen);
-        List<EditBox> textFields=new ArrayList<>();
-        for(AbstractWidget widget:widgets)if(widget instanceof EditBox box && box.active)textFields.add(box);
+        Dialog model=readDialog(current);
+        if(!(model instanceof SimpleDialog form) || !(current instanceof DialogScreen<?> dialogScreen)){
+            say(mc,"ข้อมูลหน้าต่าง: "+(model==null?"ไม่มี":model.getClass().getSimpleName()));
+            stop(mc,"ไม่พบ SimpleDialog ที่เซิร์ฟเวอร์ส่งมา");
+            return;
+        }
 
-        if(textFields.size()!=1) {
-            if(phaseTicks>45){
-                say(mc,"Widget diagnostic: "+describeDialogWidgets(widgets));
-                stop(mc,"พบช่อง Weight "+textFields.size()+" ช่อง (ต้องพบ 1 ช่อง) จึงหยุดเพื่อป้องกันการกรอกผิด");
+        // Inspect the model before ANY interaction. Only support the specific
+        // ExcellentCrates form with one Rarity selector and one Weight input.
+        Input rarityInput=null,weightInput=null;
+        for(Input input:model.common().inputs()){
+            String name=RuleConfig.normalize(input.key()+" "+input.control().label().getString());
+            if(input.control() instanceof SingleOptionInput &&
+                (name.contains("rarity") || name.contains("rari"))){
+                if(rarityInput!=null){stop(mc,"มีช่อง Rarity มากกว่า 1 ช่อง");return;}
+                rarityInput=input;
+            }else if(input.control() instanceof TextInput &&
+                (name.contains("weight") || name.contains("น้ำหนัก"))){
+                if(weightInput!=null){stop(mc,"มีช่อง Weight มากกว่า 1 ช่อง");return;}
+                weightInput=input;
             }
+        }
+        if(rarityInput==null || weightInput==null || model.common().inputs().size()!=2){
+            say(mc,"Input diagnostic: "+describeInputModel(model));
+            stop(mc,"ไม่พบ Rarity+Weight อย่างละหนึ่งช่องในข้อมูล Dialog");
             return;
         }
-        EditBox input=textFields.get(0);
-        if(!edited) {
-            input.setValue(currentRule.weight);
-            edited=true;phaseTicks=0;
-            say(mc,"กำหนด Weight เป็น "+currentRule.weight);
-            return;
-        }
-        if(!input.getValue().equals(currentRule.weight)) {
-            stop(mc,"ช่อง Weight ไม่เก็บค่าที่กรอกไว้ กรุณาส่งข้อความวินิจฉัย");return;
-        }
-
-        List<net.minecraft.client.gui.components.AbstractButton> selectors=new ArrayList<>();
-        for(AbstractWidget w:widgets){
-            if(!(w instanceof net.minecraft.client.gui.components.AbstractButton button) || !button.active)continue;
-            String text=RuleConfig.normalize(w.getMessage().getString()).trim();
-            if(text.startsWith("rarity:") || text.startsWith("rarity ") ||
-               text.startsWith("rarity：")) selectors.add(button);
-        }
-        if(selectors.size()!=1) {
-            if(phaseTicks>45){
-                say(mc,"Widget diagnostic: "+describeDialogWidgets(widgets));
-                stop(mc,"พบตัวเลือก Rarity "+selectors.size()+" ปุ่ม (ต้องพบ 1 ปุ่ม)");
-            }
-            return;
-        }
-        net.minecraft.client.gui.components.AbstractButton rarityButton=selectors.get(0);
-        String label=RuleConfig.normalize(rarityButton.getMessage().getString());
-        int delimiter=label.indexOf(':');
-        String current=rarityName(delimiter>=0?label.substring(delimiter+1):label.substring(Math.min(7,label.length())));
+        SingleOptionInput options=(SingleOptionInput)rarityInput.control();
         String desired=rarityName(currentRule.rarity);
-        if(!current.equals(desired)){
-            if(phaseTicks<10)return;
-            if(cycles>=20){stop(mc,"ไม่มี Rarity "+desired+" หลังลองเลื่อน "+cycles+" ครั้ง");return;}
-            String oldLabel=rarityButton.getMessage().getString();
-            rarityButton.onPress(new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT,0));
-            cycles++;
-            phaseTicks=0;
-            say(mc,"Rarity: "+oldLabel+" → ต้องการ "+currentRule.rarity+" ("+cycles+"/20)");
+        int target=-1;
+        int initial=0;
+        for(int i=0;i<options.entries().size();i++){
+            SingleOptionInput.Entry entry=options.entries().get(i);
+            if(entry.initial())initial=i;
+            if(matchesRarity(entry,desired)){
+                if(target!=-1){stop(mc,"พบตัวเลือก Rarity ซ้ำ: "+currentRule.rarity);return;}
+                target=i;
+            }
+        }
+        if(target<0){
+            say(mc,"ระดับที่มี: "+options.entries().stream()
+                .map(e->e.id()).toList());
+            stop(mc,"เซิร์ฟเวอร์ไม่มี Rarity "+currentRule.rarity);
+            return;
+        }
+        if(options.entries().size()>30){stop(mc,"จำนวนตัวเลือก Rarity มากผิดปกติ");return;}
+
+        // IMPORTANT: use ONE DialogControlSet for both inputs AND the OK
+        // action. Its valueGetters map contains the chosen rarity and weight.
+        DialogControlSet formControls=new DialogControlSet(dialogScreen);
+        java.util.Map<String,List<AbstractWidget>> builtWidgets=new java.util.LinkedHashMap<>();
+        for(Input input:model.common().inputs()){
+            List<AbstractWidget> built=new ArrayList<>();
+            formControls.addInput(input,(LayoutElement element)->element.visitWidgets(built::add));
+            builtWidgets.put(input.key(),built);
+        }
+
+        List<EditBox> textboxes=new ArrayList<>();
+        for(AbstractWidget widget:builtWidgets.get(weightInput.key()))
+            if(widget instanceof EditBox box)textboxes.add(box);
+        if(textboxes.size()!=1){
+            say(mc,"Input diagnostic: "+describeInputModel(model));
+            stop(mc,"สร้างช่อง Weight จาก TextInput ไม่สำเร็จ");
+            return;
+        }
+        EditBox field=textboxes.get(0);
+        field.setValue(currentRule.weight);
+        if(!field.getValue().equals(currentRule.weight)){
+            stop(mc,"กรอก Weight ไม่สำเร็จ: "+currentRule.weight);
             return;
         }
 
-        if(phaseTicks<10)return;
-        List<Button> confirms=new ArrayList<>();
-        for(AbstractWidget w:widgets){
-            if(!(w instanceof Button btn) || btn==rarityButton || !btn.active)continue;
-            String name=RuleConfig.normalize(btn.getMessage().getString()).trim();
-            if(name.equals("ok") || name.endsWith(" ok") ||
-               name.equals("done") || name.endsWith(" done") ||
-               name.equals("save") || name.endsWith(" save") ||
-               name.equals("ยืนยัน") || name.endsWith(" ยืนยัน")) confirms.add(btn);
-        }
-        if(confirms.size()!=1){
-            if(phaseTicks>50){
-                say(mc,"Widget diagnostic: "+describeDialogWidgets(widgets));
-                stop(mc,"พบปุ่มยืนยัน "+confirms.size()+" ปุ่ม (ต้องพบ 1 ปุ่ม)");
-            }
+        // SingleOption creates a native cycle button. It begins at the
+        // server-declared initial entry; cycle only as many times as required.
+        List<net.minecraft.client.gui.components.AbstractButton> chooser=new ArrayList<>();
+        for(AbstractWidget widget:builtWidgets.get(rarityInput.key()))
+            if(widget instanceof net.minecraft.client.gui.components.AbstractButton button)chooser.add(button);
+        if(chooser.size()!=1){
+            say(mc,"Input diagnostic: "+describeInputModel(model));
+            stop(mc,"สร้างปุ่ม Rarity จาก SingleOption ไม่สำเร็จ");
             return;
         }
-        confirms.get(0).onPress(new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT,0));
-        say(mc,"ส่งค่า Rarity "+currentRule.rarity+" / Weight "+currentRule.weight+" และกด OK แล้ว");
-        phase=Phase.RETURN_OPTIONS;
-        phaseTicks=0;
+        net.minecraft.client.gui.components.AbstractButton selector=chooser.get(0);
+        int steps=(target-initial+options.entries().size())%options.entries().size();
+        for(int n=0;n<steps;n++)selector.onPress(new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT,0));
+
+        // Confirm via ActionButton; it binds all registered input value getters.
+        ActionButton submit=null;
+        for(ActionButton choice:form.mainActions()){
+            String label=RuleConfig.normalize(choice.button().label().getString()).trim();
+            if(label.equals("ok") || label.endsWith(" ok") ||
+                label.contains("confirm") || label.equals("done") ||
+                label.contains("ยืนยัน") || label.equals("save")){
+                if(submit!=null){stop(mc,"มีปุ่ม OK มากกว่า 1 ปุ่ม");return;}
+                submit=choice;
+            }
+        }
+        if(submit==null && form.mainActions().size()==1)submit=form.mainActions().get(0);
+        if(submit==null){
+            stop(mc,"หา ActionButton ยืนยัน Rarity/Weight ไม่พบ");
+            return;
+        }
+        try{
+            Button ok=formControls.createActionButton(submit).build();
+            ok.onPress(new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT,0));
+            say(mc,"ส่งค่า Rarity="+options.entries().get(target).id()+
+                " Weight="+currentRule.weight+" ไปเซิร์ฟเวอร์ (จาก Dialog inputs)");
+            phase=Phase.RETURN_OPTIONS;
+            phaseTicks=0;
+        }catch(Exception error){
+            stop(mc,"ส่ง Rarity/Weight ไม่สำเร็จ: "+error.getClass().getSimpleName());
+        }
     }
 
     private static String rarityName(String text){

@@ -1,0 +1,26 @@
+# Local Java/Gradle outputs
+.gradle/
+**/build/
+out/
+*.class
+*.log
+*.backup
+*.bak
+*.tmp
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Private tokens and local configuration
+.env
+.env.*
+*.key
+*.pem
+*.p12
+secrets/
+config/crateautoreward/
+run/

@@ -1,7 +1,7 @@
-name: Rangers Friend Auto v0.5 APK
+name: Rangers Friend Auto v0.6 APK
 on:
   push:
-    branches: [rangers-friend-auto-v05-build]
+    branches: [rangers-friend-auto-v06-build]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -172,6 +172,56 @@ jobs:
           bkT1vhaFYrTC9ANeVaAAAOiyKpFWSFDrAAHMjgGAgAXAFMm5scRn+wIAAAAABFla
           PROJECT_ARCHIVE
           base64 -d /tmp/rangers-v05.b64 | tar -xJf - -C rangers-v05
+      - name: Patch persistent recovery v0.6
+        shell: bash
+        run: |
+          cat > /tmp/v06.patch.xz.b64 <<'PATCH_DATA'
+          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
+          PATCH_DATA
+          base64 -d /tmp/v06.patch.xz.b64 | xz -d > /tmp/v06.patch
+          cd rangers-v05
+          patch --batch -p0 --fuzz=0 < /tmp/v06.patch
+          grep -q 'versionName = "0.6.0"' app/build.gradle.kts
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -188,6 +238,6 @@ jobs:
         run: gradle --no-daemon -p rangers-v05 :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: LINE-Rangers-Friend-Auto-v0.5-APK
+          name: LINE-Rangers-Friend-Auto-v0.6-APK
           path: rangers-v05/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

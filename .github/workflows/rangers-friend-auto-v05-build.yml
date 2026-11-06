@@ -1,7 +1,7 @@
-name: Rangers Friend Auto v0.6 APK
+name: Rangers Friend Auto v0.7 APK
 on:
   push:
-    branches: [rangers-friend-auto-v06-build]
+    branches: [rangers-friend-auto-v07-build]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -222,6 +222,34 @@ jobs:
           cd rangers-v05
           patch --batch -p0 --fuzz=0 < /tmp/v06.patch
           grep -q 'versionName = "0.6.0"' app/build.gradle.kts
+      - name: Slow swipe and wait for friends list to settle v0.7
+        shell: bash
+        run: |
+          cat > /tmp/v07.patch.xz.b64 <<'PATCH_DATA'
+          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
+          PATCH_DATA
+          base64 -d /tmp/v07.patch.xz.b64 | xz -d > /tmp/v07.patch
+          cd rangers-v05
+          patch --batch -p0 --fuzz=0 < /tmp/v07.patch
+          grep -q 'versionName = "0.7.0"' app/build.gradle.kts
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -238,6 +266,6 @@ jobs:
         run: gradle --no-daemon -p rangers-v05 :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: LINE-Rangers-Friend-Auto-v0.6-APK
+          name: LINE-Rangers-Friend-Auto-v0.7-APK
           path: rangers-v05/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

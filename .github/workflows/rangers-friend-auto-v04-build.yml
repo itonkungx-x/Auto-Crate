@@ -123,6 +123,7 @@ jobs:
           Z/sCAAAAAARZWg==
           PROJECT_ARCHIVE
           base64 -d /tmp/rangers-v04.b64 | tar -xJf - -C rangers-friend-auto
+          sed -i 's/fillViewport = true/isFillViewport = true/' rangers-friend-auto/app/src/main/java/com/itonkung/rangersfriendauto/MainActivity.kt
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

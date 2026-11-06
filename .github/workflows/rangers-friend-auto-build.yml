@@ -133,6 +133,13 @@ jobs:
         run: |
           SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -1)
           "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Check Maven repository reachability
+        shell: bash
+        run: |
+          for base in https://repo.maven.apache.org/maven2 https://repo1.maven.org/maven2 https://maven-central.storage-download.googleapis.com/maven2 https://maven.aliyun.com/repository/public; do
+            echo -n "$base: "
+            curl --max-time 12 -s -o /dev/null -w '%{http_code} %{errormsg}\\n' "$base/org/jetbrains/annotations/13.0/annotations-13.0.pom" || true
+          done
       - name: Build APK
         run: gradle --no-daemon -p rangers-friend-auto :app:assembleDebug
       - uses: actions/upload-artifact@v4
